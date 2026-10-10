@@ -15,7 +15,7 @@ AI 只负责**搜集、清洗、汇总、入库**；投不投、合不合适，*
 **不要假设用户在飞书环境里**。正式开跑前探测一次，再决定写到哪里：
 
 ```bash
-if command -v lark-cli >/dev/null 2>&1 && lark-cli auth status >/dev/null 2>&1; then
+if command -v lark-cli >/dev/null 2>&1 && lark-cli contact +get-user >/dev/null 2>&1; then
   echo "MODE=feishu"
 else
   echo "MODE=local"
