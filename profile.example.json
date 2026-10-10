@@ -1,0 +1,7 @@
+{
+  "cities": ["深圳"],
+  "job_types": ["餐饮服务员", "门店店员", "日结配送"],
+  "channels": "all",
+  "include_mini_program": true,
+  "_WARNING": "以上为示例值，首次使用会逐题引导填写真实画像；带 _WARNING 的值不得直接开跑"
+}
