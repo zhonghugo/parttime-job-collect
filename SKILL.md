@@ -204,7 +204,7 @@ python3 scripts/dedup_keys.py --existing existing.ndjson --candidates candidates
 
 ### 7. 生成产物
 
-**feishu 模式**：用 openpyxl 输出 `parttime-jobs-YYYY-MM-DD.xlsx`，**固定 5 张表**：
+**feishu 模式**：用 openpyxl 输出 `parttime-jobs-YYYY-MM-DD.xlsx`，**固定 6 张表**（5 张分表 + 1 张总表）：
 
 | 表名 | 内容 |
 |---|---|
@@ -213,8 +213,11 @@ python3 scripts/dedup_keys.py --existing existing.ndjson --candidates candidates
 | 渠道入口与缺口 | 各渠道入口链接 + 本轮的缺口说明 |
 | 使用说明 | 表结构、字段口径、使用方法 |
 | 小程序零工渠道补充 | 小程序渠道清单（名称、入口、覆盖城市、特点、来源） |
+| 兼职总表 | **5 张分表记录的合并视图**：每条记录带「记录类型」标签（有效岗位 / 疑似过期线索 / 渠道入口 / 小程序渠道），一表看全 |
 
 ⚠️ **表名不能含 `/`**（openpyxl 报 `Invalid character / found in sheet title`），"渠道入口与缺口"不要写成"渠道/入口"。
+
+**总表 = 分表快照**：每轮导出时把 5 张分表记录合并进总表 sheet（同一条记录只出现一次，`记录类型` 标明它来自哪类）。总表是静态快照、不自动联动——每轮重新导入即刷新；线上总表的结构见「字段规范 → 总表字段」。
 
 **local 模式**：
 
@@ -269,13 +272,16 @@ lark-cli base +field-create --base-token $BASE --table-id $TBL --as user --json 
 
 ```bash
 lark-cli base +record-batch-update --base-token $BASE --table-id $TBL --as user \
-  --json '{"update_records":{"recA":{"招聘链接":"[查看岗位](https://...)","状态":["待投递"],"渠道数":1,"同岗来源":"BOSS直聘"}}}'
+  --json '{"update_records":{"recA":{"招聘链接":"[查看岗位](https://...)","状态":"待投递","渠道数":1,"同岗来源":"BOSS直聘"}}}'
 ```
+
+> ⚠️ `状态` 是单选 select，CellValue 写**字符串**（`"待投递"`），不是数组——写数组会报 `cell value does not match`。多选字段才写数组。
 
 - **招聘链接**：`[查看岗位](来源URL)`，url 样式 → 点击即跳转
 - **状态**：默认「待投递」，与全职表 10 选项一致
 - **渠道数**：去重后的平台数（number）
 - **同岗来源**：平台列表，以「；」连接（text）
+- **入口链接**：渠道/小程序表用（url 样式），回填规则见「字段规范 → 链接字段回填规范」
 
 **归并回写**（第 6 步若报告了归并，本次写新岗位之后紧接着做，同一个表连续批量写入要**串行**）：
 
@@ -288,7 +294,7 @@ lark-cli base +record-batch-update --base-token $BASE --table-id $TBL --as user 
 
 ### 11. 回读验证
 
-- **feishu**：用 `lark-cli base +record-get --record-id <id> --format json` 抽查（**写后立即验证以 record-get 为准**——record-list 刚写入后可能短暂读不到新值，属时序问题不是失败）；核对招聘链接全部非空且为 `[查看岗位](...)`、状态全部=待投递；**有归并的再核对被归并记录的 `渠道数` 已 +N**；逐表核对 record_count == 源 Excel 行数
+- **feishu**：用 `lark-cli base +record-get --record-id <id> --format json` 抽查（**写后立即验证以 record-get 为准**——record-list 刚写入后可能短暂读不到新值，属时序问题不是失败）；核对招聘链接全部非空且为 `[查看岗位](...)`、状态全部=待投递；**有归并的再核对被归并记录的 `渠道数` 已 +N**；逐表核对 record_count == 源 Excel 行数；**总表核对**：记录总数 == 5 张分表记录数之和，`记录类型` 分布与分表行数一致，招聘链接/入口链接按记录类型二选一非空
 - **local**：重读三个产出文件，核对行数与写入条数一致，csv 能被正常解析；归并结果落在 `merges-<today>.ndjson`，核对行数 == 摘要里的「归并老岗位」数
 - **体检清单不核对写入**：它是只读巡检，不该改动任何东西——若它报出的组数跟上轮对不上（清理过就会变），属正常
 
@@ -333,6 +339,22 @@ lark-cli base +record-batch-update --base-token $BASE --table-id $TBL --as user 
 | `渠道数` | number | 去重后的平台数；同平台重复见到不算 |
 | `同岗来源` | text | 平台列表，以「；」连接；同链接多平台追加来源行 |
 
+**总表字段**（兼职总表，覆盖 5 类记录，字段口径与分表一致）：
+
+`名称（主字段）| 记录类型（select：有效岗位/疑似过期线索/渠道入口/小程序渠道）| 公司|门店|品牌 | 来源平台 | 渠道分组 | 工作地点 | 薪资（招聘方口径）| 结算方式 | 工作周期与时段 | 申请入口 | 招聘链接（url）| 入口链接（url）| 状态（select 10 选项同全职）| 备注 | 序号 | 抓取时间`
+
+- **招聘链接**：岗位明细页（仅有效岗位填；渠道/小程序类留空）
+- **入口链接**：渠道/小程序直达页（仅渠道入口/小程序渠道填；有效岗位留空）——**两者按记录类型二选一填，不重复**
+- **记录类型**：总表区分记录来源的标签，是总表的分组维度
+
+**链接字段回填规范（本次线上调整后固定）**——小程序/渠道的「入口」必须可点击跳转，按以下优先级取 URL：
+
+1. **官网/官方招聘门户**：如灵工打卡 `lygo.linggongdaka.com`、快马日结 `kmrijie.cn`、猎职蜂 `lightjz.com`、星巴克 `starbucks.zhiye.com`、麦当劳 `storehire.mcdonalds.com.cn`、百胜 `yumchina.zhiye.com/alljob?c=1`
+2. **官方报道/应用商店页兜底**：纯小程序无独立官网时，用官方报道页（如腾讯零工市场 → 政府/官方媒体报道页）、应用商店下载页（App Store/应用宝）、或开发方企业信息页（企查查），链接文本注明「官方报道/下载页/无独立官网」
+3. **仍无 → 清空入口链接**，把「微信内搜「XX」」等指引保留在「申请入口」列，并在备注注明无官网原因
+
+> 例：顺薪日结（无官网）→ `[顺薪日结开发方-北京真蓝无限（企查查，无独立官网）](https://m.qcc.com/firm/...)`；有赚联盟（无任何网页）→ 入口链接留空 + 指引「微信搜平台名」。
+
 **去重键口径**：
 - **强键**：归一化链接——剥 `[文本](url)` markdown 壳 → 去追踪参数（utm/spm/from 等）→ 去尾斜杠 → 移动域名 `m.x` → `www.x` → 小写
 - **退化键**：岗位名去括号限定词 + 公司名去括号 + 去分隔符空白（小写）
@@ -356,6 +378,9 @@ bash scripts/test_dedup_keys.sh
 | sheet 子表名含 `/` 报错 | 表名避开 `/`（如「渠道入口与缺口」） |
 | openpyxl 末尾空行被带入多维表格 | 导入后逐表删空记录，核对 count |
 | 写入后 record-list 读不到新值 | 时序问题，改用 record-get 验证；等几秒再 record-list |
+| **select 单选写入传数组报 `cell value does not match`** | 单选（`multiple=false`）写**字符串**（`"状态":"待投递"`），多选才写数组 |
+| **`+record-batch-update` 报 `Expected object, received array`** | `update_records` 是 **Map<record_id, 字段对象>**（`{"recA":{"状态":"..."}}`），不是数组；`+record-batch-create` 才是数组 |
+| **url 样式字段里存纯文本，平台自动包成 `[文本](http://文本)` 无效链接** | 改字段为 url style 前先把旧文本清空或直接写 `[说明](https://真实URL)`；回读发现 `http://中文` 开头的链接 = 无效，立即重写为真实 URL |
 | url 样式字段写裸 URL 显示成 `[url](url)` | **正常**，就是可点击链接，别当 bug 重写 |
 | 线上字段被前端误删（field-list 找不到） | 用本地源 Excel 回填重建字段（先 `+field-create` 再 `+record-batch-update`） |
 | 薪资口径混乱 | 一律标「（招聘方口径）」，原样引用，不换算 |
