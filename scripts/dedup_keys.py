@@ -173,7 +173,7 @@ def main():
             # ---- 强键命中 1 条 → 归并 ----
             idx, old = hits[0]
             rid = old.get('record_id', f'<existing#{idx}>')
-            old_platforms = set(platform_norm(old.get('来源平台')) or [])
+            old_platforms = {platform_norm(old.get('来源平台'))} - {''}
             new_p = platform_norm(cand.get('来源平台'))
             same_platform = bool(new_p) and new_p in old_platforms
             combined = [old] + [cand]
